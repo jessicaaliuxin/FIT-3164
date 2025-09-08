@@ -13,33 +13,40 @@
 </form>
 
 <script>
-  const form = document.getElementById('feedbackForm');
-  const btn  = document.getElementById('submitBtn');
-  const msg  = document.getElementById('formMsg');
+  const form = document.getElementById("feedbackForm");
+  const btn = document.getElementById("submitBtn");
+  const msg = document.getElementById("formMsg");
 
-  const setMsg = (t, ok=false) => { msg.textContent = t; msg.style.color = ok ? '#18a957' : '#e23d3d'; };
+  const setMsg = (t, ok = false) => {
+    msg.textContent = t;
+    msg.style.color = ok ? "#18a957" : "#e23d3d";
+  };
 
-  form.addEventListener('submit', async (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = {
-      fullName: document.getElementById('fullName').value.trim(),
-      email: document.getElementById('email').value.trim(),
-      message: document.getElementById('message').value.trim(),
+      fullName: document.getElementById("fullName").value.trim(),
+      email: document.getElementById("email").value.trim(),
+      message: document.getElementById("message").value.trim(),
     };
-    if(!body.fullName || !body.email || !body.message) return setMsg('请填写完整信息');
+    if (!body.fullName || !body.email || !body.message) {
+      return setMsg("Please fill in all fields");
+    }
 
-    btn.disabled = true; setMsg('正在提交…');
+    btn.disabled = true;
+    setMsg("Submitting…");
+
     try {
-      const res = await fetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+      const res = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
-      if(!res.ok) throw new Error(await res.text());
-      setMsg('提交成功，感谢你的反馈！', true);
+      if (!res.ok) throw new Error(await res.text());
+      setMsg("Submitted successfully, thank you for your feedback!", true);
       form.reset();
     } catch (err) {
-      setMsg('提交失败：' + err.message);
+      setMsg("Failed to submit: " + err.message);
     } finally {
       btn.disabled = false;
     }
