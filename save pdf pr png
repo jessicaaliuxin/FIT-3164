@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Weather Viz – CSV & PNG Download Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- 若想把任意DOM区域（不是<canvas>）导出为PNG，可解注释下面的 html2canvas
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  -->
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding: 24px; background:#0f3e4a; color:#fff; }
+    .card { background:#d1a800; padding:16px; border-radius:12px; max-width:900px; margin:auto; }
+    .row { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+    button { background:#f2f2f2; color:#222; border:0; padding:10px 14px; border-radius:10px; cursor:pointer; }
+    button:active { transform: translateY(1px); }
+    .spacer { height:12px; }
+    .muted { opacity:.8; }
+  </style>
+</head>
+<body>
+  <h2>Weather Visualisation – Export CSV / PNG</h2>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="muted">Chart: Melbourne – Temperature (°C)</div>
+        <canvas id="tempChart" width="820" height="360"></canvas>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:10px; min-width:180px">
+        <button id="btnCsv">Download CSV</button>
+        <button id="btnPng">Download PNG</button>
+
+        <!-- 如果你想把整个卡片导出为PNG（不仅是图表），解注释下面按钮并启用html2canvas脚本 -->
+        <!-- <button id="btnCardPng">Download Card as PNG</button> -->
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="muted">Tip: CSV 会导出当前图表的 x 轴与每条数据线；PNG 会导出当前图表画布。</div>
+  </div>
+
+  <script>
+    // ===== 1) 模拟数据（替换为你的实时/历史数据后一样工作） =====
+    const labels = ["2025-09-01","2025-09-02","2025-09-03","2025-09-04","2025-09-05","2025-09-06","2025-09-07"];
+    const seriesTemp = [12.2, 13.5, 15.1, 14.0, 11.8, 12.7, 16.3];
+    const seriesFeelsLike = [11.0, 12.4, 14.4, 13.0, 10.9, 11.8, 15.1];
+
+    // ===== 2) 画图（Chart.js） =====
+    const ctx = document.getElementById('tempChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Temperature (°C)', data: seriesTemp, tension: .25, pointRadius: 3 },
+          { label: 'Feels Like (°C)', data: seriesFeelsLike, tension: .25, pointRadius: 3 }
+        ]
+      },
+      options: {
+        responsive: false, // 为了确保导出时尺寸稳定，demo里禁用响应式
+        animation: false,
+        scales: {
+          x: { title: { display:true, text: 'Date' }},
+          y: { title: { display:true, text: '°C' }}
+        },
+        plugins: {
+          legend: { position: 'top' },
+          title: { display: false }
+        }
+      }
+    });
+
+    // ===== 3) 下载 CSV：把图表数据拼成CSV文本，创建Blob并触发下载 =====
+    function downloadCSV(filename, labels, datasets) {
+      // 组装表头：Date + 每条数据线的label
+      const header = ['Date', ...datasets.map(ds => ds.label)];
+      const rows = [header];
+
+      // 每个x对应一行
+      for (let i = 0; i < labels.length; i++) {
+        const row = [labels[i]];
+        for (const ds of datasets) row.push(ds.data[i] ?? '');
+        rows.push(row);
+      }
+
+      // 生成CSV文本（带BOM以便Excel识别UTF-8）
+      const csvLines = rows.map(r =>
+        r.map(cell => {
+          const s = String(cell ?? '');
+          // 若包含逗号/引号/换行，则加引号并转义引号
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        }).join(',')
+      );
+      const csvString = '\uFEFF' + csvLines.join('\n');
+
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    // ===== 4) 下载 PNG（Chart.js 自带 toBase64Image） =====
+    function downloadCanvasPNG(canvas, filename) {
+      const dataUrl = canvas.toDataURL('image/png'); // 等同 chart.toBase64Image()
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    // ===== 5) 如果你想把“不是canvas的整个模块”导出成PNG（可选） =====
+    async function downloadDomPNG(domNode, filename) {
+      // 需要上面引入 html2canvas CDN
+      const canvas = await html2canvas(domNode, { backgroundColor: null, scale: 2 });
+      const dataUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename;
+      a.click();
+    }
+
+    // ===== 6) 绑定按钮 =====
+    document.getElementById('btnCsv').addEventListener('click', () => {
+      downloadCSV('melbourne_temperature.csv', chart.data.labels, chart.data.datasets);
+    });
+
+    document.getElementById('btnPng').addEventListener('click', () => {
+      downloadCanvasPNG(chart.canvas, 'melbourne_temperature.png');
+      // 或：downloadCanvasPNG(chart.canvas, `${chart.data.datasets[0].label}.png`);
+      // 或：chart.toBase64Image() 也可以拿到同样的 dataURL
+    });
+
+    // document.getElementById('btnCardPng').addEventListener('click', () => {
+    //   const card = document.querySelector('.card');
+    //   downloadDomPNG(card, 'weather_card.png');
+    // });
+  </script>
+</body>
+</html>
