@@ -1,23 +1,26 @@
 // server.js
-import express from 'express';
-import rateLimit from 'express-rate-limit';
-import cors from 'cors';
-import helmet from 'helmet';
-import Database from 'better-sqlite3';
-import nodemailer from 'nodemailer';
-import dotenv from 'dotenv';
+import express from "express";
+import rateLimit from "express-rate-limit";
+import cors from "cors";
+import helmet from "helmet";
+import Database from "better-sqlite3";
+import nodemailer from "nodemailer";
+import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
 app.use(helmet());
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: '100kb' }));
+app.use(express.json({ limit: "100kb" }));
 
-// 速率限制：10 分钟内最多 50 次
-app.use('/api/', rateLimit({ windowMs: 10*60*1000, max: 50 }));
+// Rate limit: 50 requests per 10 minutes per IP
+app.use(
+  "/api/",
+  rateLimit({ windowMs: 10 * 60 * 1000, max: 50 })
+);
 
-// SQLite 初始化
-const db = new Database('feedback.db');
+// SQLite init
+const db = new Database("feedback.db");
 db.exec(`
 CREATE TABLE IF NOT EXISTS feedback (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,78 +32,112 @@ CREATE TABLE IF NOT EXISTS feedback (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 `);
+
 const insertStmt = db.prepare(`
   INSERT INTO feedback (full_name, email, message, user_agent, ip)
   VALUES (@full_name, @email, @message, @user_agent, @ip)
 `);
 
-// 邮件发送器（Gmail/自定义 SMTP 都行）
+// Mail transporter
 const transporter = nodemailer.createTransport(
   process.env.MAIL_SERVICE
-    ? { service: process.env.MAIL_SERVICE,
-        auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASS } }
-    : { host: process.env.MAIL_HOST, port: Number(process.env.MAIL_PORT || 587),
-        secure: false, auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASS } }
+    ? {
+        service: process.env.MAIL_SERVICE,
+        auth: {
+          user: process.env.MAIL_USER,
+          pass: process.env.MAIL_PASS,
+        },
+      }
+    : {
+        host: process.env.MAIL_HOST,
+        port: Number(process.env.MAIL_PORT || 587),
+        secure: false,
+        auth: {
+          user: process.env.MAIL_USER,
+          pass: process.env.MAIL_PASS,
+        },
+      }
 );
 
-// 简单邮箱校验
-const validEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+// Simple email validation
+const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
-app.post('/api/feedback', async (req, res) => {
+app.post("/api/feedback", async (req, res) => {
   const { fullName, email, message } = req.body || {};
-  if (!fullName || !email || !message) return res.status(400).send('缺少字段');
-  if (!validEmail(email)) return res.status(400).send('邮箱格式不正确');
-  if (message.length > 5000) return res.status(413).send('内容过长');
+  if (!fullName || !email || !message) {
+    return res.status(400).send("Missing fields");
+  }
+  if (!validEmail(email)) {
+    return res.status(400).send("Invalid email format");
+  }
+  if (message.length > 5000) {
+    return res.status(413).send("Message too long");
+  }
 
   try {
     insertStmt.run({
       full_name: String(fullName).trim(),
       email: String(email).trim(),
       message: String(message).trim(),
-      user_agent: req.headers['user-agent'] || '',
-      ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress || ''
+      user_agent: req.headers["user-agent"] || "",
+      ip:
+        req.headers["x-forwarded-for"] ||
+        req.socket.remoteAddress ||
+        "",
     });
 
-    // 发邮件通知你
-    const mailTo = process.env.MAIL_TO;
+    // Send notification email
     await transporter.sendMail({
       from: `"Weather Viz" <${process.env.MAIL_USER}>`,
-      to: mailTo,
-      subject: 'New Feedback',
-      text:
-`A new feedback has been submitted.
+      to: process.env.MAIL_TO,
+      subject: "New Feedback Submission",
+      text: `A new feedback has been submitted.
+
 Name: ${fullName}
 Email: ${email}
 
 Message:
 ${message}
 
--- 
-IP: ${req.headers['x-forwarded-for'] || req.socket.remoteAddress || ''}
-UA: ${req.headers['user-agent'] || ''}`
+--
+IP: ${req.headers["x-forwarded-for"] || req.socket.remoteAddress || ""}
+UA: ${req.headers["user-agent"] || ""}`,
     });
 
     res.status(201).json({ ok: true });
   } catch (err) {
-    console.error('submit error:', err);
-    res.status(500).send('服务器错误');
+    console.error("Submit error:", err);
+    res.status(500).send("Server error");
   }
 });
 
-// 管理端：导出 CSV（简易版）
-app.get('/admin/feedback.csv', (req, res) => {
-  const rows = db.prepare('SELECT * FROM feedback ORDER BY created_at DESC').all();
-  const header = Object.keys(rows[0] || { id:'', full_name:'', email:'', message:'', created_at:'' });
-  const lines = [header.join(',')].concat(
-    rows.map(r => header.map(k => {
-      const s = String(r[k] ?? '').replace(/"/g,'""');
-      return /[",\n]/.test(s) ? `"${s}"` : s;
-    }).join(','))
+// Admin: export feedback as CSV
+app.get("/admin/feedback.csv", (req, res) => {
+  const rows = db
+    .prepare("SELECT * FROM feedback ORDER BY created_at DESC")
+    .all();
+  const header = Object.keys(
+    rows[0] || { id: "", full_name: "", email: "", message: "", created_at: "" }
   );
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="feedback.csv"');
-  res.send('\uFEFF' + lines.join('\n'));
+  const lines = [header.join(",")].concat(
+    rows.map((r) =>
+      header
+        .map((k) => {
+          const s = String(r[k] ?? "").replace(/"/g, '""');
+          return /[",\n]/.test(s) ? `"${s}"` : s;
+        })
+        .join(",")
+    )
+  );
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    "attachment; filename=\"feedback.csv\""
+  );
+  res.send("\uFEFF" + lines.join("\n"));
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(`Server running on http://localhost:${PORT}`)
+);
